@@ -1,0 +1,38 @@
+# Ignore Python cache files
+**/__pycache__/
+**/*.py[cod]
+
+# Ignore build directories and files
+/src/build/
+/src/dist/
+/src/lstm.egg-info/
+
+# Ignore configuration and temporary files
+*.egg-info/
+*.log
+
+# Ignore compiled Python files
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore any backup or temporary files
+*.bak
+*.swp
+*.tmp
+
+# Ignore compiled bytecode and other files generated during build
+**/*.py[cod]
+**/*.so
+**/*.dll
+**/*.o
+**/*.a
+**/*.dylib
+**/*.lib
+**/*.exp
+
+# Ignore package distributions
+*.egg
+*.egg-info/
+dist/
+build/
