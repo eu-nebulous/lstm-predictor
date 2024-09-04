@@ -36,3 +36,6 @@
 *.egg-info/
 dist/
 build/
+
+# Ignore JetBrains IDE settings
+.idea/
