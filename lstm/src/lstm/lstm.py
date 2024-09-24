@@ -32,8 +32,6 @@ def predict_with_lstm(data_filename, attribute, next_prediction_time=None):
     config = configparser.ConfigParser()
     config.read(config_path)
 
-    realtime_mode = config.getboolean('DEFAULT', 'realtime_mode')
-    number_of_seconds_to_aggregate_on = config.getint('DEFAULT', 'number_of_seconds_to_aggregate_on')
     generate_prediction_png_output = config.getboolean('DEFAULT', 'generate_prediction_png_output')
     png_output_file = config.get('DEFAULT', 'png_output_file')
 
@@ -67,6 +65,7 @@ def predict_with_lstm(data_filename, attribute, next_prediction_time=None):
     # Prepare dataset
     forecasting_horizon = config.getint('DEFAULT', 'horizon')
     if forecasting_horizon > 0 and next_prediction_time:
+        next_prediction_time = int(next_prediction_time)  # Convert to integer
         last_timestamp_data = next_prediction_time - forecasting_horizon
     else:
         last_timestamp_data = data_to_process.index[-1].timestamp()
@@ -107,7 +106,7 @@ def predict_with_lstm(data_filename, attribute, next_prediction_time=None):
     model.compile(optimizer='adam', loss='mean_squared_error')
 
     # Train the model
-    model.fit(x_train, y_train, epochs=20, batch_size=32, verbose=1)
+    model.fit(x_train, y_train, epochs=1, batch_size=32, verbose=1)
 
     # Make predictions
     predictions = model.predict(x_test)
@@ -149,7 +148,7 @@ def predict_with_lstm(data_filename, attribute, next_prediction_time=None):
     # Assuming predictions have been made but confidence interval is not computed
     results = {
         "prediction_value": predictions[-1][0],
-        "confidence_interval": None,  # Changed from "Not computed" to None
+        "confidence_interval": None,
         "mae": mae,
         "mse": mse,
         "mape": mape,

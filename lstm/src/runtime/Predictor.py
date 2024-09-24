@@ -192,7 +192,7 @@ def update_prediction_time(epoch_start, prediction_horizon, maximum_time_for_pre
     return prediction_time
 
 
-def calculate_and_publish_predictions(application_state, maximum_time_required_for_prediction):
+def calculate_and_publish_predictions(application_state, application_name, maximum_time_required_for_prediction):
     start_forecasting = application_state.start_forecasting
 
     while start_forecasting:
@@ -271,8 +271,8 @@ def calculate_and_publish_predictions(application_state, maximum_time_required_f
                         for publisher in LstmPredictorState.broker_publishers:
                             # if publisher.address=="eu.nebulouscloud.monitoring.preliminary_predicted.lstm"+attribute:
 
-                            if publisher.key == "publisher_" + attribute:
-                                publisher.send(prediction_message_body)
+                            if publisher.key == "publisher_" + application_name + "-" +attribute:
+                                publisher.send(prediction_message_body, application_name)
 
                         # State.connection.send_to_topic('intermediate_prediction.%s.%s' % (id, attribute), prediction_message_body)
 
@@ -470,7 +470,7 @@ class ConsumerHandler(Handler):
                 maximum_time_required_for_prediction = LstmPredictorState.prediction_processing_time_safety_margin_seconds  # initialization, assuming X seconds processing time to derive a first prediction
                 if ((self.prediction_thread is None) or (not self.prediction_thread.is_alive())):
                     self.prediction_thread = threading.Thread(target=calculate_and_publish_predictions,
-                                                              args=[application_state,
+                                                              args=[application_state, application_name,
                                                                     maximum_time_required_for_prediction])
                     self.prediction_thread.start()
 
