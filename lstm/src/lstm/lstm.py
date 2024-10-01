@@ -148,7 +148,7 @@ def predict_with_lstm(data_filename, attribute, next_prediction_time=None):
     # Assuming predictions have been made but confidence interval is not computed
     results = {
         "prediction_value": predictions[-1][0],
-        "confidence_interval": None,
+        "confidence_interval": "-10,10",
         "mae": mae,
         "mse": mse,
         "mape": mape,
