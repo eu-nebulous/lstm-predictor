@@ -54,7 +54,6 @@ class ApplicationState:
 
         logging.info("The response for listing a possibly existing bucket is " + str(
             response.status_code) + " for application " + application_name)
-        logging.info("Response Jan: " + str(response.json()))
         if ((response.status_code == 200) and ("buckets" in response.json()) and (len(response.json()["buckets"]) > 0)):
             logging.info("The bucket already existed for the particular application, skipping its creation...")
         else:

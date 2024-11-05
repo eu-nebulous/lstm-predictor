@@ -35,7 +35,7 @@ def sanitize_prediction_statistics(prediction_confidence_interval, prediction_va
     lower_value_prediction_confidence_interval = float(prediction_confidence_interval.split(",")[0])
     upper_value_prediction_confidence_interval = float(prediction_confidence_interval.split(",")[1])
 
-    """if (not application_name in EsPredictorState.individual_application_state):
+    """if (not application_name in LstmPredictorState.individual_application_state):
         print_with_time("There is an issue with the application name"+application_name+" not existing in individual application states")
         return prediction_confidence_interval,prediction_value_produced"""
 
@@ -45,36 +45,41 @@ def sanitize_prediction_statistics(prediction_confidence_interval, prediction_va
     confidence_interval_modified = False
     new_prediction_confidence_interval = prediction_confidence_interval
     if ((lower_bound_value is None) and (upper_bound_value is None)):
-        print_with_time(f"Lower value is unmodified - {lower_value_prediction_confidence_interval} and upper value is unmodified - {upper_value_prediction_confidence_interval}")
-        return new_prediction_confidence_interval,prediction_value
+        print_with_time(
+            f"Lower value is unmodified - {lower_value_prediction_confidence_interval} and upper value is unmodified - {upper_value_prediction_confidence_interval}")
+        return new_prediction_confidence_interval, prediction_value
     elif (lower_bound_value is not None):
-        if (upper_value_prediction_confidence_interval < lower_bound_value[metric_name]):
-            upper_value_prediction_confidence_interval = lower_bound_value[metric_name]
-            lower_value_prediction_confidence_interval = lower_bound_value[metric_name]
+        if (upper_value_prediction_confidence_interval < lower_bound_value):
+            upper_value_prediction_confidence_interval = lower_bound_value
+            lower_value_prediction_confidence_interval = lower_bound_value
             confidence_interval_modified = True
         elif (lower_value_prediction_confidence_interval < lower_bound_value):
-            lower_value_prediction_confidence_interval = lower_bound_value[metric_name]
+            lower_value_prediction_confidence_interval = lower_bound_value
             confidence_interval_modified = True
     elif (upper_bound_value is not None):
-        if (lower_value_prediction_confidence_interval > upper_bound_value[metric_name]):
-            lower_value_prediction_confidence_interval = upper_bound_value[metric_name]
-            upper_value_prediction_confidence_interval = upper_bound_value[metric_name]
+        if (lower_value_prediction_confidence_interval > upper_bound_value):
+            lower_value_prediction_confidence_interval = upper_bound_value
+            upper_value_prediction_confidence_interval = upper_bound_value
             confidence_interval_modified = True
-        elif (upper_value_prediction_confidence_interval> upper_bound_value[metric_name]):
-            upper_value_prediction_confidence_interval = upper_bound_value[metric_name]
+        elif (upper_value_prediction_confidence_interval > upper_bound_value):
+            upper_value_prediction_confidence_interval = upper_bound_value
             confidence_interval_modified = True
 
     if confidence_interval_modified:
-        new_prediction_confidence_interval = str(lower_value_prediction_confidence_interval)+","+str(upper_value_prediction_confidence_interval)
-        print_with_time("The confidence interval "+prediction_confidence_interval+" was modified, becoming "+str(new_prediction_confidence_interval)+", taking into account the values of the metric")
-    if (prediction_value<lower_bound_value):
-        print_with_time("The prediction value of " + str(prediction_value) + " for metric " + metric_name + " was sanitized to " + str(lower_bound_value))
+        new_prediction_confidence_interval = str(lower_value_prediction_confidence_interval) + "," + str(
+            upper_value_prediction_confidence_interval)
+        print_with_time("The confidence interval " + prediction_confidence_interval + " was modified, becoming " + str(
+            new_prediction_confidence_interval) + ", taking into account the values of the metric")
+    if (prediction_value < lower_bound_value):
+        print_with_time("The prediction value of " + str(
+            prediction_value) + " for metric " + metric_name + " was sanitized to " + str(lower_bound_value))
         prediction_value = lower_bound_value
     elif (prediction_value > upper_bound_value):
-        print_with_time("The prediction value of " + str(prediction_value) + " for metric " + metric_name + " was sanitized to " + str(upper_bound_value))
+        print_with_time("The prediction value of " + str(
+            prediction_value) + " for metric " + metric_name + " was sanitized to " + str(upper_bound_value))
         prediction_value = upper_bound_value
 
-    return new_prediction_confidence_interval,prediction_value
+    return new_prediction_confidence_interval, prediction_value
 
 
 def predict_attribute(application_state, attribute, configuration_file_location, next_prediction_time):
@@ -320,7 +325,7 @@ class ConsumerHandler(Handler):
         if (address).startswith(LstmPredictorState.MONITORING_DATA_PREFIX):
             address = address.replace(LstmPredictorState.MONITORING_DATA_PREFIX, "", 1)
 
-            logging.info("New monitoring data arrived at topic " + address)
+            logging.debug("New monitoring data arrived at topic " + address)
             if address == 'metric_list':
                 application_name = body["name"]
                 message_version = body["version"]
@@ -373,7 +378,7 @@ class ConsumerHandler(Handler):
                     application_name = body["name"]
                     message_version = 0
                     if (not "version" in body):
-                        logging.info(
+                        logging.debug(
                             "There was an issue in finding the message version in the body of the start forecasting message, assuming it is 1")
                         message_version = 1
                     else:
@@ -483,12 +488,12 @@ class ConsumerHandler(Handler):
                 application_name = body["name"]
                 application_state = LstmPredictorState.individual_application_state[application_name]
                 print_with_time("Received message to stop predicting some of the metrics")
-                metrics_to_remove = json.loads(body)["metrics"]
+                metrics_to_remove = body["metrics"]
                 for metric in metrics_to_remove:
                     if (application_state.metrics_to_predict.__contains__(metric)):
                         print_with_time("Stopping generating predictions for metric " + metric)
                         application_state.metrics_to_predict.remove(metric)
-                if len(application_state.metrics_to_predict) == 0:
+                if (len(metrics_to_remove)==0 or len(application_state.metrics_to_predict)==0):
                     LstmPredictorState.individual_application_state[application_name].start_forecasting = False
                     LstmPredictorState[application_name].prediction_thread.join()
             else:
@@ -525,7 +530,7 @@ Utilities.load_configuration()
 Utilities.update_influxdb_organization_id()
 # Subscribe to retrieve the metrics which should be used
 
-
+logging.basicConfig(level=logging.info)
 id = "lstm"
 LstmPredictorState.disconnected = True
 
