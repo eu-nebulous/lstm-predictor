@@ -29,10 +29,9 @@ from runtime.operational_status.LstmPredictorState import LstmPredictorState
 print_with_time = Utilities.print_with_time
 
 
-def sanitize_prediction_statistics(prediction_confidence_interval, prediction_value, metric_name, application_state):
-    print_with_time(
-        "Inside the sanitization process with an interval of  " + prediction_confidence_interval + " and a prediction of " + str(
-            prediction_value))
+def sanitize_prediction_statistics(prediction_confidence_interval, prediction_value, metric_name, lower_bound_value, upper_bound_value):
+
+    print_with_time("Inside the sanitization process with an interval of  " + prediction_confidence_interval +" and a prediction of " + str(prediction_value))
     lower_value_prediction_confidence_interval = float(prediction_confidence_interval.split(",")[0])
     upper_value_prediction_confidence_interval = float(prediction_confidence_interval.split(",")[1])
 
@@ -40,39 +39,42 @@ def sanitize_prediction_statistics(prediction_confidence_interval, prediction_va
         print_with_time("There is an issue with the application name"+application_name+" not existing in individual application states")
         return prediction_confidence_interval,prediction_value_produced"""
 
-    lower_bound_value = application_state.lower_bound_value
-    upper_bound_value = application_state.upper_bound_value
+    #lower_bound_value = application_state.lower_bound_value
+    #upper_bound_value = application_state.upper_bound_value
 
-    print("Lower_bound_value is " + str(lower_bound_value))
     confidence_interval_modified = False
     new_prediction_confidence_interval = prediction_confidence_interval
-    if (not (metric_name in lower_bound_value)) or (not (metric_name in upper_bound_value)):
+    if ((lower_bound_value is None) and (upper_bound_value is None)):
         print_with_time(
             f"Lower value is unmodified - {lower_value_prediction_confidence_interval} and upper value is unmodified - {upper_value_prediction_confidence_interval}")
         return new_prediction_confidence_interval, prediction_value
+    elif (lower_bound_value is not None):
+        if (upper_value_prediction_confidence_interval < lower_bound_value):
+            upper_value_prediction_confidence_interval = lower_bound_value
+            lower_value_prediction_confidence_interval = lower_bound_value
+            confidence_interval_modified = True
+        elif (lower_value_prediction_confidence_interval < lower_bound_value):
+            lower_value_prediction_confidence_interval = lower_bound_value
+            confidence_interval_modified = True
+    elif (upper_bound_value is not None):
+        if (lower_value_prediction_confidence_interval > upper_bound_value):
+            lower_value_prediction_confidence_interval = upper_bound_value
+            upper_value_prediction_confidence_interval = upper_bound_value
+            confidence_interval_modified = True
+        elif (upper_value_prediction_confidence_interval > upper_bound_value):
+            upper_value_prediction_confidence_interval = upper_bound_value
+            confidence_interval_modified = True
 
-    if (lower_value_prediction_confidence_interval < lower_bound_value[metric_name]):
-        lower_value_prediction_confidence_interval = lower_bound_value[metric_name]
-        confidence_interval_modified = True
-    elif (lower_value_prediction_confidence_interval > upper_bound_value[metric_name]):
-        lower_value_prediction_confidence_interval = upper_bound_value[metric_name]
-        confidence_interval_modified = True
-    if (upper_value_prediction_confidence_interval > upper_bound_value[metric_name]):
-        upper_value_prediction_confidence_interval = upper_bound_value[metric_name]
-        confidence_interval_modified = True
-    elif (upper_value_prediction_confidence_interval < lower_bound_value[metric_name]):
-        upper_value_prediction_confidence_interval = lower_bound_value[metric_name]
-        confidence_interval_modified = True
     if confidence_interval_modified:
         new_prediction_confidence_interval = str(lower_value_prediction_confidence_interval) + "," + str(
             upper_value_prediction_confidence_interval)
         print_with_time("The confidence interval " + prediction_confidence_interval + " was modified, becoming " + str(
             new_prediction_confidence_interval) + ", taking into account the values of the metric")
-    if (prediction_value < lower_bound_value[metric_name]):
+    if (prediction_value < lower_bound_value):
         print_with_time("The prediction value of " + str(
             prediction_value) + " for metric " + metric_name + " was sanitized to " + str(lower_bound_value))
         prediction_value = lower_bound_value
-    elif (prediction_value > upper_bound_value[metric_name]):
+    elif (prediction_value > upper_bound_value):
         print_with_time("The prediction value of " + str(
             prediction_value) + " for metric " + metric_name + " was sanitized to " + str(upper_bound_value))
         prediction_value = upper_bound_value
@@ -106,19 +108,19 @@ def predict_attribute(application_state, attribute, configuration_file_location,
         prediction_results = predict_with_lstm(application_state.prediction_data_filename, attribute,
                                                next_prediction_time=next_prediction_time)
 
+    prediction_confidence_interval = ("-10000000000000000000000000,10000000000000000000000000")
     # Check and parse the prediction results
     if prediction_results:
         prediction_value = prediction_results.get('prediction_value', 0)
 
-        prediction_confidence_interval = prediction_results.get('confidence_interval',
-                                                                "-10000000000000000000000000,10000000000000000000000000")
         prediction_mae = prediction_results.get('mae', 0)
         prediction_mse = prediction_results.get('mse', 0)
         prediction_mape = prediction_results.get('mape', 0)
         prediction_smape = prediction_results.get('smape', 0)
+    else:
+        return
 
     if prediction_confidence_interval is None:
-        prediction_confidence_interval = "-10000000000000000000000000,10000000000000000000000000"
 
         if prediction_value != 0 and prediction_confidence_interval:
             prediction_confidence_interval, prediction_value = sanitize_prediction_statistics(
@@ -147,20 +149,20 @@ def predict_attributes(application_state, next_prediction_time):
     attributes = application_state.metrics_to_predict
     pool = multiprocessing.Pool(len(attributes))
     print_with_time("Prediction thread pool size set to " + str(len(attributes)))
+    prediction_results = {}
     attribute_predictions = {}
 
     for attribute in attributes:
         print_with_time("Starting " + attribute + " prediction thread")
         start_time = time.time()
-        attribute_predictions[attribute] = pool.apply_async(predict_attribute, args=[application_state, attribute,
-                                                                                     LstmPredictorState.configuration_file_location,
-                                                                                     str(next_prediction_time)])
-        # attribute_predictions[attribute] = pool.apply_async(predict_attribute, args=[attribute, configuration_file_location,str(next_prediction_time)]).get()
-
+        application_state.prediction_data_filename = application_state.get_prediction_data_filename(LstmPredictorState.configuration_file_location,attribute)
+        prediction_results[attribute] = pool.apply_async(predict_attribute, args=[attribute,application_state.prediction_data_filename, application_state.lower_bound_value[attribute],application_state.upper_bound_value[attribute],str(next_prediction_time)]
+                                                 )
     for attribute in attributes:
-        attribute_predictions[attribute] = attribute_predictions[attribute].get()  # get the results of the processing
-        attribute_predictions[attribute].set_last_prediction_time_needed(int(time.time() - start_time))
-        # prediction_time_needed[attribute])
+        attribute_predictions[attribute] = prediction_results[attribute].get() #get the results of the processing
+        if attribute_predictions[attribute] is not None:
+            attribute_predictions[attribute].set_last_prediction_time_needed(int(time.time() - start_time))
+            # prediction_time_needed[attribute])
 
     pool.close()
     pool.join()
@@ -196,7 +198,7 @@ def calculate_and_publish_predictions(application_state, application_name, maxim
     start_forecasting = application_state.start_forecasting
 
     while start_forecasting:
-        print_with_time("Using " + LstmPredictorState.configuration_file_location + " for configuration details...")
+        print_with_time("Using " + LstmPredictorState.configuration_file_location + f" for configuration details related to forecasts of {application_state.application_name}...")
         application_state.next_prediction_time = update_prediction_time(application_state.epoch_start,
                                                                         application_state.prediction_horizon,
                                                                         maximum_time_required_for_prediction)
@@ -241,7 +243,7 @@ def calculate_and_publish_predictions(application_state, application_name, maxim
                 # continue was here, to continue while loop, replaced by break
                 break
             for attribute in application_state.metrics_to_predict:
-                if (not prediction[attribute].prediction_valid):
+                if (prediction[attribute] is None or not prediction[attribute].prediction_valid):
                     # continue was here, to continue while loop, replaced by break
                     break
                 if (LstmPredictorState.disconnected or LstmPredictorState.check_stale_connection()):
@@ -323,7 +325,7 @@ class ConsumerHandler(Handler):
         if (address).startswith(LstmPredictorState.MONITORING_DATA_PREFIX):
             address = address.replace(LstmPredictorState.MONITORING_DATA_PREFIX, "", 1)
 
-            logging.info("New monitoring data arrived at topic " + address)
+            logging.debug("New monitoring data arrived at topic " + address)
             if address == 'metric_list':
                 application_name = body["name"]
                 message_version = body["version"]
@@ -376,7 +378,7 @@ class ConsumerHandler(Handler):
                     application_name = body["name"]
                     message_version = 0
                     if (not "version" in body):
-                        logging.info(
+                        logging.debug(
                             "There was an issue in finding the message version in the body of the start forecasting message, assuming it is 1")
                         message_version = 1
                     else:
@@ -389,13 +391,20 @@ class ConsumerHandler(Handler):
                         LstmPredictorState.individual_application_state[application_name] = ApplicationState(
                             application_name, message_version)
                         application_state = LstmPredictorState.individual_application_state[application_name]
-
-                    if (not application_state.start_forecasting) or (
-                            (application_state.metrics_to_predict is not None) and (
-                            len(application_state.metrics_to_predict) <= len(body["metrics"]))):
+                    if (not application_state.start_forecasting) or ((application_state.metrics_to_predict is not None) and (set(application_state.metrics_to_predict)!=set(body["metrics"]))):
                         application_state.metrics_to_predict = body["metrics"]
                         print_with_time("Received request to start predicting the following metrics: " + ",".join(
                             application_state.metrics_to_predict) + " for application " + application_name + ", proceeding with the prediction process")
+                        if (not application_state.start_forecasting):
+                            #Coarse initialization, needs to be improved with metric_list message
+                            for metric in application_state.metrics_to_predict:
+                                application_state.lower_bound_value[metric] = None
+                                application_state.upper_bound_value[metric] = None
+                        else:
+                            new_metrics = set(body["metrics"]) - set(application_state.metrics_to_predict)
+                            for metric in new_metrics:
+                                application_state.lower_bound_value[metric] = None
+                                application_state.upper_bound_value[metric] = None
                     else:
                         application_state.metrics_to_predict = body["metrics"]
                         print_with_time("Received request to start predicting the following metrics: " + body[
@@ -468,11 +477,9 @@ class ConsumerHandler(Handler):
                     LstmPredictorState.configuration_details.store(f, encoding="utf-8")
 
                 maximum_time_required_for_prediction = LstmPredictorState.prediction_processing_time_safety_margin_seconds  # initialization, assuming X seconds processing time to derive a first prediction
-                if ((self.prediction_thread is None) or (not self.prediction_thread.is_alive())):
-                    self.prediction_thread = threading.Thread(target=calculate_and_publish_predictions,
-                                                              args=[application_state, application_name,
-                                                                    maximum_time_required_for_prediction])
-                    self.prediction_thread.start()
+            if ((LstmPredictorState.individual_application_state[application_name].prediction_thread is None) or (not LstmPredictorState.individual_application_state[application_name].prediction_thread.is_alive())):
+                LstmPredictorState.individual_application_state[application_name].prediction_thread = threading.Thread(target = calculate_and_publish_predictions, args =[application_state,maximum_time_required_for_prediction])
+                LstmPredictorState.individual_application_state[application_name].prediction_thread.start()
 
                 # waitfor(first period)
 
@@ -481,15 +488,14 @@ class ConsumerHandler(Handler):
                 application_name = body["name"]
                 application_state = LstmPredictorState.individual_application_state[application_name]
                 print_with_time("Received message to stop predicting some of the metrics")
-                metrics_to_remove = json.loads(body)["metrics"]
+                metrics_to_remove = body["metrics"]
                 for metric in metrics_to_remove:
                     if (application_state.metrics_to_predict.__contains__(metric)):
                         print_with_time("Stopping generating predictions for metric " + metric)
                         application_state.metrics_to_predict.remove(metric)
-                if len(application_state.metrics_to_predict) == 0:
+                if (len(metrics_to_remove)==0 or len(application_state.metrics_to_predict)==0):
                     LstmPredictorState.individual_application_state[application_name].start_forecasting = False
-                    self.prediction_thread.join()
-
+                    LstmPredictorState[application_name].prediction_thread.join()
             else:
                 print_with_time(
                     "The address was " + address + " and did not match metrics_to_predict/test.lstm/start_forecasting.lstm/stop_forecasting.lstm")
@@ -524,7 +530,7 @@ Utilities.load_configuration()
 Utilities.update_influxdb_organization_id()
 # Subscribe to retrieve the metrics which should be used
 
-
+logging.basicConfig(level=logging.info)
 id = "lstm"
 LstmPredictorState.disconnected = True
 
