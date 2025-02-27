@@ -7,7 +7,7 @@ from .core.manager import Manager
 from .settings import base
 from .handler import connector_handler
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARN, format='%(asctime)s - %(levelname)s - %(message)s')
 _logger = logging.getLogger(__name__)
 
 
