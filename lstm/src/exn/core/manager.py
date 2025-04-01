@@ -9,7 +9,7 @@ from .consumer import Consumer
 from .publisher import Publisher
 
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.WARN)
+_logger.setLevel(logging.INFO)
 
 
 class SessionPerConsumer(object):

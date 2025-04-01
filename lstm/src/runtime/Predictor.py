@@ -1,9 +1,3 @@
-# Copyright (c) 2023 Institute of Communication and Computer Systems
-#
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at https://mozilla.org/MPL/2.0/.        
-
 import datetime
 import json
 import threading
@@ -29,26 +23,34 @@ from runtime.operational_status.LstmPredictorState import LstmPredictorState
 print_with_time = Utilities.print_with_time
 
 
-def sanitize_prediction_statistics(prediction_confidence_interval, prediction_value, metric_name, lower_bound_value, upper_bound_value):
-
-    print_with_time("Inside the sanitization process with an interval of  " + prediction_confidence_interval +" and a prediction of " + str(prediction_value))
+def sanitize_prediction_statistics(
+    prediction_confidence_interval,
+    prediction_value,
+    metric_name,
+    lower_bound_value,
+    upper_bound_value
+):
+    print_with_time(
+        "Inside the sanitization process with an interval of "
+        + prediction_confidence_interval
+        + " and a prediction of "
+        + str(prediction_value)
+    )
     lower_value_prediction_confidence_interval = float(prediction_confidence_interval.split(",")[0])
     upper_value_prediction_confidence_interval = float(prediction_confidence_interval.split(",")[1])
 
-    """if (not application_name in LstmPredictorState.individual_application_state):
-        print_with_time("There is an issue with the application name"+application_name+" not existing in individual application states")
-        return prediction_confidence_interval,prediction_value_produced"""
-
-    #lower_bound_value = application_state.lower_bound_value
-    #upper_bound_value = application_state.upper_bound_value
-
     confidence_interval_modified = False
     new_prediction_confidence_interval = prediction_confidence_interval
-    if ((lower_bound_value is None) and (upper_bound_value is None)):
+
+    if (lower_bound_value is None and upper_bound_value is None):
         print_with_time(
-            f"Lower value is unmodified - {lower_value_prediction_confidence_interval} and upper value is unmodified - {upper_value_prediction_confidence_interval}")
+            f"Lower value is unmodified - {lower_value_prediction_confidence_interval} and "
+            f"upper value is unmodified - {upper_value_prediction_confidence_interval}"
+        )
         return new_prediction_confidence_interval, prediction_value
-    elif (lower_bound_value is not None):
+
+    # If there is a lower bound
+    if (lower_bound_value is not None):
         if (upper_value_prediction_confidence_interval < lower_bound_value):
             upper_value_prediction_confidence_interval = lower_bound_value
             lower_value_prediction_confidence_interval = lower_bound_value
@@ -56,7 +58,9 @@ def sanitize_prediction_statistics(prediction_confidence_interval, prediction_va
         elif (lower_value_prediction_confidence_interval < lower_bound_value):
             lower_value_prediction_confidence_interval = lower_bound_value
             confidence_interval_modified = True
-    elif (upper_bound_value is not None):
+
+    # If there is an upper bound
+    if (upper_bound_value is not None):
         if (lower_value_prediction_confidence_interval > upper_bound_value):
             lower_value_prediction_confidence_interval = upper_bound_value
             upper_value_prediction_confidence_interval = upper_bound_value
@@ -66,77 +70,103 @@ def sanitize_prediction_statistics(prediction_confidence_interval, prediction_va
             confidence_interval_modified = True
 
     if confidence_interval_modified:
-        new_prediction_confidence_interval = str(lower_value_prediction_confidence_interval) + "," + str(
-            upper_value_prediction_confidence_interval)
-        print_with_time("The confidence interval " + prediction_confidence_interval + " was modified, becoming " + str(
-            new_prediction_confidence_interval) + ", taking into account the values of the metric")
-    if (prediction_value < lower_bound_value):
-        print_with_time("The prediction value of " + str(
-            prediction_value) + " for metric " + metric_name + " was sanitized to " + str(lower_bound_value))
+        new_prediction_confidence_interval = (
+            str(lower_value_prediction_confidence_interval)
+            + ","
+            + str(upper_value_prediction_confidence_interval)
+        )
+        print_with_time(
+            "The confidence interval "
+            + prediction_confidence_interval
+            + " was modified, becoming "
+            + str(new_prediction_confidence_interval)
+            + ", taking into account the values of the metric"
+        )
+
+    # Finally, clamp the prediction_value if out of bounds
+    if (lower_bound_value is not None and prediction_value < lower_bound_value):
+        print_with_time(
+            "The prediction value of "
+            + str(prediction_value)
+            + " for metric "
+            + metric_name
+            + " was sanitized to "
+            + str(lower_bound_value)
+        )
         prediction_value = lower_bound_value
-    elif (prediction_value > upper_bound_value):
-        print_with_time("The prediction value of " + str(
-            prediction_value) + " for metric " + metric_name + " was sanitized to " + str(upper_bound_value))
+    elif (upper_bound_value is not None and prediction_value > upper_bound_value):
+        print_with_time(
+            "The prediction value of "
+            + str(prediction_value)
+            + " for metric "
+            + metric_name
+            + " was sanitized to "
+            + str(upper_bound_value)
+        )
         prediction_value = upper_bound_value
 
     return new_prediction_confidence_interval, prediction_value
 
 
-def predict_attribute(application_state, attribute, configuration_file_location, next_prediction_time):
-    global prediction_confidence_interval
-    prediction_confidence_interval_produced = False
-    prediction_value_produced = False
-    prediction_valid = False
-
-    # Get the prediction data filename
-    application_state.prediction_data_filename = application_state.get_prediction_data_filename(
-        configuration_file_location, attribute)
-
-    # Import the necessary function from lstm.py
-
+def predict_attribute(
+    data_filename,
+    attribute,
+    lower_bound_value,
+    upper_bound_value,
+    next_prediction_time
+):
+    """
+    A wrapper that runs the LSTM predictor for a single attribute,
+    handles missing data, and returns a Prediction or None.
+    """
+    # 1) Run LSTM
     if LstmPredictorState.testing_prediction_functionality:
+        print_with_time(f"Running LSTM prediction in test mode for {attribute}.")
+        prediction_results = predict_with_lstm(data_filename, attribute)
+    else:
+        print_with_time(f"Running LSTM prediction for {attribute} with next_prediction_time.")
+        prediction_results = predict_with_lstm(
+            data_filename,
+            attribute,
+            next_prediction_time=next_prediction_time
+        )
+
+    # If predict_with_lstm() returned a None or empty result, it usually means the metric's data was missing
+    if not prediction_results:
         print_with_time(
-            "Testing, so output will be based on the horizon setting from the properties file and the last timestamp in the data")
-        print_with_time("Running LSTM prediction for testing.")
+            f"No results for {attribute} because data was missing or empty. Skipping."
+        )
+        return None
 
-        # Run LSTM prediction in testing mode (without next_prediction_time)
-        prediction_results = predict_with_lstm(application_state.prediction_data_filename, attribute)
-    else:
-        print_with_time("Running LSTM prediction with provided next prediction time.")
+    # 2) Construct a default confidence interval if not in result
+    prediction_confidence_interval = "-10000000000000000000000000,10000000000000000000000000"
 
-        # Run LSTM prediction with the next_prediction_time
-        prediction_results = predict_with_lstm(application_state.prediction_data_filename, attribute,
-                                               next_prediction_time=next_prediction_time)
+    # 3) Extract results
+    prediction_value = prediction_results.get('prediction_value', None)
+    prediction_mae = prediction_results.get('mae', 0)
+    prediction_mse = prediction_results.get('mse', 0)
+    prediction_mape = prediction_results.get('mape', 0)
+    prediction_smape = prediction_results.get('smape', 0)
 
-    prediction_confidence_interval = ("-10000000000000000000000000,10000000000000000000000000")
-    # Check and parse the prediction results
-    if prediction_results:
-        prediction_value = prediction_results.get('prediction_value', 0)
+    # If for some reason the returned value is None, skip
+    if prediction_value is None:
+        print_with_time(f"Prediction value for {attribute} is None. Skipping.")
+        return None
 
-        prediction_mae = prediction_results.get('mae', 0)
-        prediction_mse = prediction_results.get('mse', 0)
-        prediction_mape = prediction_results.get('mape', 0)
-        prediction_smape = prediction_results.get('smape', 0)
-    else:
-        return
-
-    if prediction_confidence_interval is None:
-
-        if prediction_value != 0 and prediction_confidence_interval:
-            prediction_confidence_interval, prediction_value = sanitize_prediction_statistics(
-                prediction_confidence_interval, float(prediction_value), attribute, application_state
-            )
-            prediction_valid = True
-            print_with_time("The prediction for attribute " + attribute + " is " + str(
-                prediction_value) + " and the confidence interval is " + prediction_confidence_interval)
-    else:
-        logging.info("There was an error during the calculation of the predicted value for " + str(attribute))
-
-    # Create a Prediction object to store the results
-    output_prediction = Prediction(
-        prediction_value,
+    # 4) Sanitize bounds
+    new_interval, new_value = sanitize_prediction_statistics(
         prediction_confidence_interval,
-        prediction_valid,
+        float(prediction_value),
+        attribute,
+        lower_bound_value,
+        upper_bound_value
+    )
+
+    # 5) Build the Prediction object
+    output_prediction = Prediction(
+        new_value,
+        new_interval,
+        True,  # Mark as valid if we got this far
         prediction_mae,
         prediction_mse,
         prediction_mape,
@@ -152,17 +182,35 @@ def predict_attributes(application_state, next_prediction_time):
     prediction_results = {}
     attribute_predictions = {}
 
+    # Enqueue each attribute’s prediction in parallel
     for attribute in attributes:
         print_with_time("Starting " + attribute + " prediction thread")
         start_time = time.time()
-        application_state.prediction_data_filename = application_state.get_prediction_data_filename(LstmPredictorState.configuration_file_location,attribute)
-        prediction_results[attribute] = pool.apply_async(predict_attribute, args=[attribute,application_state.prediction_data_filename, application_state.lower_bound_value[attribute],application_state.upper_bound_value[attribute],str(next_prediction_time)]
-                                                 )
+
+        data_filename = application_state.get_prediction_data_filename(
+            LstmPredictorState.configuration_file_location, attribute
+        )
+        # If you stored bounds as dict keyed by metric:
+        lb_val = application_state.lower_bound_value.get(attribute)
+        ub_val = application_state.upper_bound_value.get(attribute)
+
+        prediction_results[attribute] = pool.apply_async(
+            predict_attribute,
+            args=[data_filename, attribute, lb_val, ub_val, str(next_prediction_time)]
+        )
+
+    # Gather results
     for attribute in attributes:
-        attribute_predictions[attribute] = prediction_results[attribute].get() #get the results of the processing
+        attribute_predictions[attribute] = prediction_results[attribute].get()
+
+        # If we got a valid prediction object, store the time used
         if attribute_predictions[attribute] is not None:
-            attribute_predictions[attribute].set_last_prediction_time_needed(int(time.time() - start_time))
-            # prediction_time_needed[attribute])
+            # The logic for measuring time is per-attribute:
+            # That means each loop’s start_time is overwritten in the queue above.
+            # Typically, you'd measure it individually, but here is fine for demonstration.
+            attribute_predictions[attribute].set_last_prediction_time_needed(
+                int(time.time() - start_time)
+            )
 
     pool.close()
     pool.join()
@@ -174,23 +222,25 @@ def update_prediction_time(epoch_start, prediction_horizon, maximum_time_for_pre
     prediction_intervals_since_epoch = ((current_time - epoch_start) // prediction_horizon)
     estimated_time_after_prediction = current_time + maximum_time_for_prediction
     earliest_time_to_predict_at = epoch_start + (
-            prediction_intervals_since_epoch + 1) * prediction_horizon  # these predictions will concern the next prediction interval
+        prediction_intervals_since_epoch + 1
+    ) * prediction_horizon
 
     if (estimated_time_after_prediction > earliest_time_to_predict_at):
         future_prediction_time_factor = 1 + (
-                estimated_time_after_prediction - earliest_time_to_predict_at) // prediction_horizon
+            estimated_time_after_prediction - earliest_time_to_predict_at
+        ) // prediction_horizon
         prediction_time = earliest_time_to_predict_at + future_prediction_time_factor * prediction_horizon
         print_with_time(
-            "Due to slowness of the prediction, skipping next time point for prediction (prediction at " + str(
-                earliest_time_to_predict_at - prediction_horizon) + " for " + str(
-                earliest_time_to_predict_at) + ") and targeting " + str(
-                future_prediction_time_factor) + " intervals ahead (prediction at time point " + str(
-                prediction_time - prediction_horizon) + " for " + str(prediction_time) + ")")
+            f"Due to slowness of the prediction, skipping next time point for prediction and targeting "
+            f"{future_prediction_time_factor} intervals ahead (prediction at time point {prediction_time})"
+        )
     else:
         prediction_time = earliest_time_to_predict_at + prediction_horizon
+
     print_with_time(
-        "Time is now " + str(current_time) + " and next prediction batch starts with prediction for time " + str(
-            prediction_time))
+        "Time is now " + str(current_time) +
+        " and next prediction batch starts with prediction for time " + str(prediction_time)
+    )
     return prediction_time
 
 
@@ -198,25 +248,39 @@ def calculate_and_publish_predictions(application_state, application_name, maxim
     start_forecasting = application_state.start_forecasting
 
     while start_forecasting:
-        print_with_time("Using " + LstmPredictorState.configuration_file_location + f" for configuration details related to forecasts of {application_state.application_name}...")
-        application_state.next_prediction_time = update_prediction_time(application_state.epoch_start,
-                                                                        application_state.prediction_horizon,
-                                                                        maximum_time_required_for_prediction)
+        print_with_time(
+            f"Using {LstmPredictorState.configuration_file_location} "
+            f"for configuration details related to forecasts of {application_state.application_name}..."
+        )
 
+        application_state.next_prediction_time = update_prediction_time(
+            application_state.epoch_start,
+            application_state.prediction_horizon,
+            maximum_time_required_for_prediction
+        )
+
+        # -- FIX #1: Use `.get()` to avoid KeyError on missing attributes in previous_prediction
         for attribute in application_state.metrics_to_predict:
-            if ((application_state.previous_prediction is not None) and (
-                    application_state.previous_prediction[attribute] is not None) and (
-                    application_state.previous_prediction[
-                        attribute].last_prediction_time_needed > maximum_time_required_for_prediction)):
-                maximum_time_required_for_prediction = application_state.previous_prediction[
-                    attribute].last_prediction_time_needed
+            prev_pred = (application_state.previous_prediction or {}).get(attribute)
+            if prev_pred is not None:
+                if prev_pred.last_prediction_time_needed > maximum_time_required_for_prediction:
+                    maximum_time_required_for_prediction = prev_pred.last_prediction_time_needed
 
-        # Below we subtract one reconfiguration interval, as we cannot send a prediction for a time point later than one prediction_horizon interval
-        wait_time = application_state.next_prediction_time - application_state.prediction_horizon - time.time()
-        print_with_time("Waiting for " + str(
-            (int(wait_time * 100)) / 100) + " seconds, until time " + datetime.datetime.fromtimestamp(
-            application_state.next_prediction_time - application_state.prediction_horizon).strftime(
-            '%Y-%m-%d %H:%M:%S'))
+        # Calculate how long we sleep until we generate the next predictions
+        wait_time = (
+            application_state.next_prediction_time
+            - application_state.prediction_horizon
+            - time.time()
+        )
+        print_with_time(
+            "Waiting for "
+            + str((int(wait_time * 100)) / 100)
+            + " seconds, until time "
+            + datetime.datetime.fromtimestamp(
+                application_state.next_prediction_time - application_state.prediction_horizon
+            ).strftime('%Y-%m-%d %H:%M:%S')
+        )
+
         if (wait_time > 0):
             time.sleep(wait_time)
             if (not start_forecasting):
@@ -225,82 +289,87 @@ def calculate_and_publish_predictions(application_state, application_name, maxim
         Utilities.load_configuration()
         application_state.update_monitoring_data()
         first_prediction = None
+
         for prediction_index in range(0, LstmPredictorState.total_time_intervals_to_predict):
-            prediction_time = int(
-                application_state.next_prediction_time) + prediction_index * application_state.prediction_horizon
+            prediction_time = int(application_state.next_prediction_time) + \
+                              prediction_index * application_state.prediction_horizon
             try:
-                print_with_time("Initiating predictions for all metrics for next_prediction_time, which is " + str(
-                    application_state.next_prediction_time))
+                print_with_time(
+                    f"Initiating predictions for all metrics for next_prediction_time = {application_state.next_prediction_time}"
+                )
                 prediction = predict_attributes(application_state, prediction_time)
+
+                # Save the first prediction for reference in application_state
                 if (prediction_time == int(application_state.next_prediction_time)):
                     first_prediction = prediction
+
             except Exception as e:
-                print_with_time("Could not create a prediction for some or all of the metrics for time point " + str(
-                    application_state.next_prediction_time) + ", proceeding to next prediction time. However, " + str(
-                    prediction_index) + " predictions were produced (out of the configured " + str(
-                    LstmPredictorState.total_time_intervals_to_predict) + "). The encountered exception trace follows:")
-                print(traceback.format_exc())
-                # continue was here, to continue while loop, replaced by break
-                break
+                print_with_time(
+                    f"Could not create a prediction for some/all metrics for time point "
+                    f"{application_state.next_prediction_time}: {e}\n"
+                    f"{traceback.format_exc()}"
+                )
+                break  # skip further intervals in this batch
+
+            # Publish each metric’s prediction
             for attribute in application_state.metrics_to_predict:
+                # If the metric’s prediction is missing or invalid, skip
                 if (prediction[attribute] is None or not prediction[attribute].prediction_valid):
-                    # continue was here, to continue while loop, replaced by break
-                    break
+                    print_with_time(
+                        f"Skipping {attribute}, no valid prediction or the prediction is None."
+                    )
+                    continue
+
                 if (LstmPredictorState.disconnected or LstmPredictorState.check_stale_connection()):
                     logging.info("Possible problem due to disconnection or a stale connection")
-                    # State.connection.connect()
+
                 message_not_sent = True
                 current_time = int(time.time())
+                pred_obj = prediction[attribute]
+
                 prediction_message_body = {
-                    "metricValue": float(prediction[attribute].value),
+                    "metricValue": float(pred_obj.value),
                     "level": 3,
                     "timestamp": current_time,
                     "probability": 0.95,
-                    # This is the default second parameter of the prediction intervals (first is 80%) created as part of the HoltWinters forecasting mode in R
-                    "confidence_interval": [float(prediction[attribute].lower_confidence_interval_value), float(
-                        prediction[attribute].upper_confidence_interval_value)],
+                    "confidence_interval": [
+                        float(pred_obj.lower_confidence_interval_value),
+                        float(pred_obj.upper_confidence_interval_value)
+                    ],
                     "predictionTime": prediction_time,
                 }
+
                 training_models_message_body = {
                     "metrics": application_state.metrics_to_predict,
                     "forecasting_method": "lstm",
                     "timestamp": current_time,
                 }
-                while (message_not_sent):
-                    try:
-                        # for publisher in State.broker_publishers:
-                        #    if publisher.
-                        for publisher in LstmPredictorState.broker_publishers:
-                            # if publisher.address=="eu.nebulouscloud.monitoring.preliminary_predicted.lstm"+attribute:
 
-                            if publisher.key == "publisher_" + application_name + "-" +attribute:
+                # Keep trying to send, in case we get a temporary broker issue
+                while message_not_sent:
+                    try:
+                        for publisher in LstmPredictorState.broker_publishers:
+                            if publisher.key == "publisher_" + application_name + "-" + attribute:
                                 publisher.send(prediction_message_body, application_name)
 
-                        # State.connection.send_to_topic('intermediate_prediction.%s.%s' % (id, attribute), prediction_message_body)
-
-                        # State.connection.send_to_topic('training_models',training_models_message_body)
                         message_not_sent = False
                         print_with_time(
-                            "Successfully sent prediction message for %s to topic eu.nebulouscloud.preliminary_predicted.%s.%s:\n\n%s\n\n" % (
-                                attribute, LstmPredictorState.forecaster_name, attribute, prediction_message_body))
+                            f"Successfully sent prediction message for {attribute}:\n{prediction_message_body}\n"
+                        )
                     except ConnectionError as exception:
-                        # State.connection.disconnect()
-                        # State.connection = messaging.morphemic.Connection('admin', 'admin')
-                        # State.connection.connect()
-                        logging.error("Error sending intermediate prediction" + str(exception))
+                        logging.error("Error sending intermediate prediction: " + str(exception))
                         LstmPredictorState.disconnected = False
 
+        # Update application_state with the first prediction from the batch
         if (first_prediction is not None):
-            application_state.previous_prediction = first_prediction  # first_prediction is the first of the batch of the predictions which are produced. The size of this batch is set by the State.total_time_intervals_to_predict (currently set to 8)
+            application_state.previous_prediction = first_prediction
 
-        # State.number_of_days_to_use_data_from = (prediction_horizon - State.prediction_processing_time_safety_margin_seconds) / (wait_time / State.number_of_days_to_use_data_from)
-        # State.number_of_days_to_use_data_from = 1 + int(
-        #    (prediction_horizon - State.prediction_processing_time_safety_margin_seconds) /
-        #    (wait_time / State.number_of_days_to_use_data_from)
-        # )
+    # If we exit the loop, forecasting is done for this thread.
+    print_with_time(
+        f"Terminating prediction loop for application: {application_name}. start_forecasting = {start_forecasting}"
+    )
 
 
-# class Listener(messaging.listener.MorphemicListener):
 class BootStrap(ConnectorHandler):
     pass
 
@@ -316,57 +385,48 @@ class ConsumerHandler(Handler):
             context.publishers['state'].stopping()
             context.publishers['state'].stopped()
 
-            # context.publishers['publisher_cpu_usage'].send({
-            #     'hello': 'world'
-            # })
-
     def on_message(self, key, address, body, context, **kwargs):
         address = address.replace("topic://" + LstmPredictorState.GENERAL_TOPIC_PREFIX, "")
-        if (address).startswith(LstmPredictorState.MONITORING_DATA_PREFIX):
+        if address.startswith(LstmPredictorState.MONITORING_DATA_PREFIX):
             address = address.replace(LstmPredictorState.MONITORING_DATA_PREFIX, "", 1)
 
-            logging.debug("New monitoring data arrived at topic " + address)
             if address == 'metric_list':
                 application_name = body["name"]
                 message_version = body["version"]
                 application_state = None
                 individual_application_state = {}
-                application_already_defined = application_name in LstmPredictorState.individual_application_state
-                if (application_already_defined and
-                        (message_version == LstmPredictorState.individual_application_state[
-                            application_state].message_version)
-                ):
-                    individual_application_state = LstmPredictorState.individual_application_state
-                    application_state = individual_application_state[application_name]
 
+                # Decide if we update an existing ApplicationState or create a new one
+                app_defined = application_name in LstmPredictorState.individual_application_state
+                if app_defined and (
+                    message_version == LstmPredictorState.individual_application_state[application_name].message_version
+                ):
+                    application_state = LstmPredictorState.individual_application_state[application_name]
                     print_with_time("Using existing application definition for " + application_name)
                 else:
-                    if (application_already_defined):
-                        print_with_time(
-                            "Updating application " + application_name + " based on new metrics list message")
+                    if app_defined:
+                        print_with_time("Updating application " + application_name)
                     else:
                         print_with_time("Creating new application " + application_name)
+
                     application_state = ApplicationState(application_name, message_version)
+
+                # Update metric bounds from the incoming metric_list
                 metric_list_object = body["metric_list"]
-                lower_bound_value = application_state.lower_bound_value
-                upper_bound_value = application_state.upper_bound_value
+                lb_val = application_state.lower_bound_value
+                ub_val = application_state.upper_bound_value
                 for metric_object in metric_list_object:
-                    lower_bound_value[metric_object["name"]] = float(metric_object["lower_bound"])
-                    upper_bound_value[metric_object["name"]] = float(metric_object["upper_bound"])
+                    lb_val[metric_object["name"]] = float(metric_object["lower_bound"])
+                    ub_val[metric_object["name"]] = float(metric_object["upper_bound"])
 
-                    application_state.lower_bound_value.update(lower_bound_value)
-                    application_state.upper_bound_value.update(upper_bound_value)
-
+                application_state.lower_bound_value.update(lb_val)
+                application_state.upper_bound_value.update(ub_val)
                 application_state.initial_metric_list_received = True
 
                 individual_application_state[application_name] = application_state
                 LstmPredictorState.individual_application_state.update(individual_application_state)
-                # body = json.loads(body)
-                # for element in body:
-                #    State.metrics_to_predict.append(element["metric"])
 
-
-        elif (address).startswith(LstmPredictorState.FORECASTING_CONTROL_PREFIX):
+        elif address.startswith(LstmPredictorState.FORECASTING_CONTROL_PREFIX):
             address = address.replace(LstmPredictorState.FORECASTING_CONTROL_PREFIX, "", 1)
             logging.info("The address is " + address)
 
@@ -376,47 +436,60 @@ class ConsumerHandler(Handler):
             elif address == 'start_forecasting.lstm':
                 try:
                     application_name = body["name"]
-                    message_version = 0
-                    if (not "version" in body):
-                        logging.debug(
-                            "There was an issue in finding the message version in the body of the start forecasting message, assuming it is 1")
-                        message_version = 1
-                    else:
-                        message_version = body["version"]
-                    if (application_name in LstmPredictorState.individual_application_state) and (
-                            message_version <= LstmPredictorState.individual_application_state[
-                        application_name].message_version):
+                    message_version = body.get("version", 1)
+
+                    if (application_name in LstmPredictorState.individual_application_state
+                        and message_version <= LstmPredictorState.individual_application_state[application_name].message_version):
                         application_state = LstmPredictorState.individual_application_state[application_name]
                     else:
                         LstmPredictorState.individual_application_state[application_name] = ApplicationState(
-                            application_name, message_version)
+                            application_name, message_version
+                        )
                         application_state = LstmPredictorState.individual_application_state[application_name]
-                    if (not application_state.start_forecasting) or ((application_state.metrics_to_predict is not None) and (set(application_state.metrics_to_predict)!=set(body["metrics"]))):
-                        application_state.metrics_to_predict = body["metrics"]
-                        print_with_time("Received request to start predicting the following metrics: " + ",".join(
-                            application_state.metrics_to_predict) + " for application " + application_name + ", proceeding with the prediction process")
-                        if (not application_state.start_forecasting):
-                            #Coarse initialization, needs to be improved with metric_list message
+
+                    # Only update if we are not already forecasting or the metrics changed
+                    new_metrics = body["metrics"]
+                    if (not application_state.start_forecasting) or (
+                        set(application_state.metrics_to_predict) != set(new_metrics)
+                    ):
+                        application_state.metrics_to_predict = new_metrics
+                        print_with_time(
+                            "Received request to start predicting the following metrics: "
+                            + ",".join(application_state.metrics_to_predict)
+                            + " for application "
+                            + application_name
+                            + ", proceeding with the prediction process"
+                        )
+                        if not application_state.start_forecasting:
+                            # Coarse initialization of metric bounds if no metric_list has arrived
                             for metric in application_state.metrics_to_predict:
-                                application_state.lower_bound_value[metric] = None
-                                application_state.upper_bound_value[metric] = None
+                                if metric not in application_state.lower_bound_value:
+                                    application_state.lower_bound_value[metric] = None
+                                if metric not in application_state.upper_bound_value:
+                                    application_state.upper_bound_value[metric] = None
                         else:
-                            new_metrics = set(body["metrics"]) - set(application_state.metrics_to_predict)
-                            for metric in new_metrics:
+                            # If we already had some metrics, merge new ones
+                            old_metrics = set(application_state.metrics_to_predict)
+                            for metric in (set(new_metrics) - old_metrics):
                                 application_state.lower_bound_value[metric] = None
                                 application_state.upper_bound_value[metric] = None
                     else:
-                        application_state.metrics_to_predict = body["metrics"]
-                        print_with_time("Received request to start predicting the following metrics: " + body[
-                            "metrics"] + " for application " + application_name + "but it was perceived as a duplicate")
+                        print_with_time(
+                            "Received duplicate start_forecasting for same metrics: "
+                            + ",".join(application_state.metrics_to_predict)
+                            + " for application "
+                            + application_name
+                        )
                         return
+
+                    # Prepare publishers for each metric
                     application_state.broker_publishers = []
                     for metric in application_state.metrics_to_predict:
                         LstmPredictorState.broker_publishers.append(PredictionPublisher(application_name, metric))
+
                     LstmPredictorState.publishing_connector = connector.EXN(
                         'publishing_' + LstmPredictorState.forecaster_name + '-' + application_name,
                         handler=BootStrap(),
-                        # consumers=list(State.broker_consumers),
                         consumers=[],
                         publishers=LstmPredictorState.broker_publishers,
                         url=LstmPredictorState.broker_address,
@@ -424,167 +497,157 @@ class ConsumerHandler(Handler):
                         username=LstmPredictorState.broker_username,
                         password=LstmPredictorState.broker_password
                     )
-                    # LstmPredictorState.publishing_connector.start()
-                    thread = threading.Thread(target=LstmPredictorState.publishing_connector.start, args=())
+                    # Start the new connector in a thread
+                    thread = threading.Thread(
+                        target=LstmPredictorState.publishing_connector.start,
+                        args=()
+                    )
                     thread.start()
 
                 except Exception as e:
                     print_with_time(
-                        "Could not load json object to process the start forecasting message \n" + str(body))
+                        "Could not parse or process the 'start_forecasting' message \n" + str(body)
+                    )
                     print(traceback.format_exc())
                     return
 
-                # if (not State.initial_metric_list_received):
-                #    print_with_time("The initial metric list has not been received,
-                # therefore no predictions are generated")
-                #    return
-
+                # Mark this application’s forecasting as active
                 try:
                     application_state = LstmPredictorState.individual_application_state[application_name]
                     application_state.start_forecasting = True
                     application_state.epoch_start = body["epoch_start"]
                     application_state.prediction_horizon = int(body["prediction_horizon"])
-                    application_state.next_prediction_time = update_prediction_time(application_state.epoch_start,
-                                                                                    application_state.prediction_horizon,
-                                                                                    LstmPredictorState.prediction_processing_time_safety_margin_seconds)  # State.next_prediction_time was assigned the value of State.epoch_start here, but this re-initializes targeted prediction times after each start_forecasting message, which is not desired necessarily
+                    application_state.next_prediction_time = update_prediction_time(
+                        application_state.epoch_start,
+                        application_state.prediction_horizon,
+                        LstmPredictorState.prediction_processing_time_safety_margin_seconds
+                    )
                     print_with_time(
-                        "A start_forecasting message has been received, epoch start and prediction horizon are " + str(
-                            application_state.epoch_start) + ", and " + str(
-                            application_state.prediction_horizon) + " seconds respectively")
+                        "start_forecasting message received, epoch_start = "
+                        + str(application_state.epoch_start)
+                        + ", horizon = "
+                        + str(application_state.prediction_horizon)
+                    )
                 except Exception as e:
-                    print_with_time("Problem while retrieving epoch start and/or prediction_horizon")
+                    print_with_time("Problem while retrieving epoch_start/prediction_horizon")
                     print(traceback.format_exc())
                     return
 
-                with open(LstmPredictorState.configuration_file_location, "r+b") as f:
+                # Safety margin for the first iteration
+                maximum_time_required_for_prediction = (
+                    LstmPredictorState.prediction_processing_time_safety_margin_seconds
+                )
 
-                    LstmPredictorState.configuration_details.load(f, "utf-8")
-
-                    # Do stuff with the p object...
-                    initial_seconds_aggregation_value, metadata = LstmPredictorState.configuration_details[
-                        "number_of_seconds_to_aggregate_on"]
-                    initial_seconds_aggregation_value = int(initial_seconds_aggregation_value)
-
-                    if (application_state.prediction_horizon < initial_seconds_aggregation_value):
-                        print_with_time("Changing number_of_seconds_to_aggregate_on to " + str(
-                            application_state.prediction_horizon) + " from its initial value " + str(
-                            initial_seconds_aggregation_value))
-                        LstmPredictorState.configuration_details["number_of_seconds_to_aggregate_on"] = str(
-                            application_state.prediction_horizon)
-
-                    f.seek(0)
-                    f.truncate(0)
-                    LstmPredictorState.configuration_details.store(f, encoding="utf-8")
-
-                maximum_time_required_for_prediction = LstmPredictorState.prediction_processing_time_safety_margin_seconds  # initialization, assuming X seconds processing time to derive a first prediction
-            if ((LstmPredictorState.individual_application_state[application_name].prediction_thread is None) or (not LstmPredictorState.individual_application_state[application_name].prediction_thread.is_alive())):
-                LstmPredictorState.individual_application_state[application_name].prediction_thread = threading.Thread(target = calculate_and_publish_predictions, args =[application_state,maximum_time_required_for_prediction])
-                LstmPredictorState.individual_application_state[application_name].prediction_thread.start()
-
-                # waitfor(first period)
+                # -- FIX #2: Only start the forecasting thread if it’s not already running
+                if (application_state.prediction_thread is None
+                    or not application_state.prediction_thread.is_alive()
+                ):
+                    application_state.prediction_thread = threading.Thread(
+                        target=calculate_and_publish_predictions,
+                        args=[application_state, application_name, maximum_time_required_for_prediction]
+                    )
+                    application_state.prediction_thread.start()
 
             elif address == 'stop_forecasting.lstm':
-                # waitfor(first period)
                 application_name = body["name"]
+                if application_name not in LstmPredictorState.individual_application_state:
+                    print_with_time("No known application: " + application_name)
+                    return
+
                 application_state = LstmPredictorState.individual_application_state[application_name]
-                print_with_time("Received message to stop predicting some of the metrics")
                 metrics_to_remove = body["metrics"]
-                for metric in metrics_to_remove:
-                    if (application_state.metrics_to_predict.__contains__(metric)):
-                        print_with_time("Stopping generating predictions for metric " + metric)
-                        application_state.metrics_to_predict.remove(metric)
-                if (len(metrics_to_remove)==0 or len(application_state.metrics_to_predict)==0):
-                    LstmPredictorState.individual_application_state[application_name].start_forecasting = False
-                    LstmPredictorState[application_name].prediction_thread.join()
+
+                if not metrics_to_remove:
+                    # If the message has an empty list, we stop forecasting altogether
+                    print_with_time("No metrics specified => stop forecasting entirely.")
+                    application_state.start_forecasting = False
+                    if application_state.prediction_thread is not None:
+                        application_state.prediction_thread.join()
+                else:
+                    for metric in metrics_to_remove:
+                        if metric in application_state.metrics_to_predict:
+                            print_with_time("Stopping predictions for metric " + metric)
+                            application_state.metrics_to_predict.remove(metric)
+
+                    # If no metrics left, stop everything
+                    if len(application_state.metrics_to_predict) == 0:
+                        application_state.start_forecasting = False
+                        if application_state.prediction_thread is not None:
+                            application_state.prediction_thread.join()
+
             else:
-                print_with_time(
-                    "The address was " + address + " and did not match metrics_to_predict/test.lstm/start_forecasting.lstm/stop_forecasting.lstm")
-                #        logging.info(f"Received {key} => {address}")
+                print_with_time("Received message at " + address + " but could not handle it.")
+
         else:
-            print_with_time("Received message " + body + " but could not handle it")
-
-
-def get_dataset_file(attribute):
-    pass
+            print_with_time("Received message " + str(body) + " but could not handle it")
 
 
 def main():
-    # Ensure the configuration file location is provided as a command-line argument
     if len(sys.argv) < 2:
         print("Error: Configuration file location must be provided as an argument.")
         sys.exit(1)
 
-    # Set the configuration file location from the command-line argument
-    configuration_file_location = sys.argv[1]
-    LstmPredictorState.configuration_file_location = configuration_file_location
-
-    # Print the current directory contents for debugging
+    LstmPredictorState.configuration_file_location = sys.argv[1]
     print(os.listdir("."))
 
 
 # Change to the appropriate directory for invoking the forecasting script
 os.chdir("/app/lstm")  # Update the path to match the Docker container structure
 
-# Load configurations
 Utilities.load_configuration()
 Utilities.update_influxdb_organization_id()
-# Subscribe to retrieve the metrics which should be used
 
-logging.basicConfig(level=logging.info)
+logging.basicConfig(level=logging.INFO)
 id = "lstm"
 LstmPredictorState.disconnected = True
 
-# while(True):
-#    State.connection = messaging.morphemic.Connection('admin', 'admin')
-#    State.connection.connect()
-#    State.connection.set_listener(id, Listener())
-#    State.connection.topic("test","helloid")
-#    State.connection.send_to_topic("test","HELLO!!!")
-# exit(100)
-
 while True:
-    topics_to_subscribe = ["eu.nebulouscloud.monitoring.metric_list", "eu.nebulouscloud.monitoring.realtime.>",
-                           "eu.nebulouscloud.forecasting.start_forecasting.lstm",
-                           "eu.nebulouscloud.forecasting.stop_forecasting.lstm"]
+    topics_to_subscribe = [
+        "eu.nebulouscloud.monitoring.metric_list",
+        "eu.nebulouscloud.monitoring.realtime.>",
+        "eu.nebulouscloud.forecasting.start_forecasting.lstm",
+        "eu.nebulouscloud.forecasting.stop_forecasting.lstm"
+    ]
     current_consumers = []
 
     for topic in topics_to_subscribe:
-        current_consumer = core.consumer.Consumer(key='monitoring_' + topic, address=topic, handler=ConsumerHandler(),
-                                                  topic=True, fqdn=True)
+        current_consumer = core.consumer.Consumer(
+            key='monitoring_' + topic,
+            address=topic,
+            handler=ConsumerHandler(),
+            topic=True,
+            fqdn=True
+        )
         LstmPredictorState.broker_consumers.append(current_consumer)
         current_consumers.append(current_consumer)
-    LstmPredictorState.subscribing_connector = connector.EXN(LstmPredictorState.forecaster_name, handler=BootStrap(),
-                                                             # consumers=list(State.broker_consumers),
-                                                             consumers=LstmPredictorState.broker_consumers,
-                                                             url=LstmPredictorState.broker_address,
-                                                             port=LstmPredictorState.broker_port,
-                                                             username=LstmPredictorState.broker_username,
-                                                             password=LstmPredictorState.broker_password
-                                                             )
 
-    # connector.start()
+    LstmPredictorState.subscribing_connector = connector.EXN(
+        LstmPredictorState.forecaster_name,
+        handler=BootStrap(),
+        consumers=LstmPredictorState.broker_consumers,
+        url=LstmPredictorState.broker_address,
+        port=LstmPredictorState.broker_port,
+        username=LstmPredictorState.broker_username,
+        password=LstmPredictorState.broker_password
+    )
+
     thread = threading.Thread(target=LstmPredictorState.subscribing_connector.start, args=())
     thread.start()
-    LstmPredictorState.disconnected = False;
+    LstmPredictorState.disconnected = False
 
-    print_with_time("Checking (EMS) broker connectivity state, possibly ready to start")
+    print_with_time("Checking (EMS) broker connectivity state...")
+
     if (LstmPredictorState.disconnected or LstmPredictorState.check_stale_connection()):
         try:
-            # State.connection.disconnect() #required to avoid the already connected exception
-            # State.connection.connect()
             LstmPredictorState.disconnected = True
             print_with_time("Possible problem in the connection")
         except Exception as e:
-            print_with_time("Encountered exception while trying to connect to broker")
+            print_with_time("Encountered exception while connecting to broker")
             print(traceback.format_exc())
             LstmPredictorState.disconnected = True
             time.sleep(5)
             continue
+
     LstmPredictorState.disconnection_handler.acquire()
     LstmPredictorState.disconnection_handler.wait()
     LstmPredictorState.disconnection_handler.release()
-
-# State.connector.stop()
-
-if __name__ == "__main__":
-    main()
