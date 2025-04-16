@@ -79,10 +79,10 @@ def predict_with_lstm(data_filename, attribute, next_prediction_time=None):
     print("Testing data sample:")
     print(test_data.head())
 
-    # Scale the data (only 'cpu_usage')
+    # Scale the data using the dynamic attribute
     scaler = MinMaxScaler(feature_range=(0, 1))
-    train_scaled = scaler.fit_transform(train_data[['cpu_usage']])  # Only scale the 'cpu_usage' column
-    test_scaled = scaler.transform(test_data[['cpu_usage']])
+    train_scaled = scaler.fit_transform(train_data[[attribute]])
+    test_scaled = scaler.transform(test_data[[attribute]])
 
     # Prepare data for LSTM (samples, timesteps, features)
     timesteps = 10
