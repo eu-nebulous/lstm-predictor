@@ -56,7 +56,7 @@ class LstmPredictorState:
     broker_address = "localhost"
     broker_port = 5672
     broker_username = "admin"
-    broker_password = "admin"
+    broker_password = "nebulous"
 
 
     @staticmethod
