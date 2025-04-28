@@ -13,6 +13,7 @@ from exn import connector
 from exn.core.handler import Handler
 from exn.handler.connector_handler import ConnectorHandler
 from lstm.lstm import predict_with_lstm
+from proton import Message
 from runtime.operational_status.ApplicationState import ApplicationState
 from runtime.predictions.Prediction import Prediction
 from runtime.utilities.PredictionPublisher import PredictionPublisher
@@ -385,7 +386,7 @@ class ConsumerHandler(Handler):
             context.publishers['state'].stopping()
             context.publishers['state'].stopped()
 
-    def on_message(self, key, address, body, context, **kwargs):
+    def on_message(self, key, address, body, message: Message, context):
         address = address.replace("topic://" + LstmPredictorState.GENERAL_TOPIC_PREFIX, "")
         if address.startswith(LstmPredictorState.MONITORING_DATA_PREFIX):
             address = address.replace(LstmPredictorState.MONITORING_DATA_PREFIX, "", 1)
