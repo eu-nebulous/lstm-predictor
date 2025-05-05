@@ -76,8 +76,8 @@ class Utilities:
             "INFLUXDB_USERNAME", "INFLUXDB_USERNAME"
         )
 
-        LstmPredictorState.influxdb_password = Utilities.get_config_value(
-            "INFLUXDB_PASSWORD", "INFLUXDB_PASSWORD"
+        LstmPredictorState.influxdb_token = Utilities.get_config_value(
+            "INFLUXDB_TOKEN", "INFLUXDB_TOKEN"
         )
 
         LstmPredictorState.influxdb_org = Utilities.get_config_value(
